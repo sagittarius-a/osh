@@ -7,9 +7,13 @@ use std::path::Path;
 use std::process::{Child, Command, Stdio};
 
 /// Perform environment variable expansion.
+// TODO: Expand ~
 fn perform_expansion(value: &str) -> String {
     // Early exit if not variable to expand is found
     if !value.contains('$') {
+        if value.contains('~') && env::var("HOME").is_ok() {
+            return value.replace('~', &env::var("HOME").unwrap());
+        }
         return value.into();
     }
 
@@ -53,8 +57,11 @@ fn perform_expansion(value: &str) -> String {
         }
     }
 
-    // Remove last space and last slash inserted
-    result.join("")
+    let expanded = result.join("");
+    if expanded.contains('~') && env::var("HOME").is_ok() {
+        return expanded.replace('~', &env::var("HOME").unwrap());
+    }
+    expanded
 }
 
 fn main() -> Result<()> {
