@@ -2,5 +2,7 @@
 name = "bubble-shell"
 version = "0.1.0"
 authors = ["Sagittarius-a", "Josh Mcguigan"]
+edition = "2018"
 
 [dependencies]
+rustyline = "8.2.0"
