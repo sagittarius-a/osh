@@ -26,9 +26,14 @@ fn main() {
 
             match command {
                 "cd" => {
-                    // default to '/' as new directory if one was not provided
-                    let new_dir = args.peekable().peek().map_or("/", |x| *x);
-                    let root = Path::new(new_dir);
+                    // default to '~' of '/' as new directory if one was not provided
+                    let dir = match env::var("HOME") {
+                        Ok(val) => val,
+                        Err(_) => "/".into(),
+                    };
+                    let mut peek = args.peekable();
+                    let new_dir = peek.peek().ok_or(dir);
+                    let root = Path::new(new_dir.unwrap());
                     if let Err(e) = env::set_current_dir(&root) {
                         eprintln!("{}", e);
                     }
