@@ -5,9 +5,16 @@ use std::process::{Child, Command, Stdio};
 
 fn main() {
     loop {
-        // use the `>` character as the prompt
-        // need to explicitly flush this to ensure it prints before read_line
-        print!("> ");
+        // Setup prompt
+        let cwd = match env::current_dir() {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("{}", e);
+                std::path::PathBuf::new()
+            }
+        };
+        print!("{} $ ", cwd.to_str().unwrap().replace("\"", ""));
+        // Need to explicitly flush to ensure it prints before read_line
         stdout().flush().unwrap();
 
         let mut input = String::new();
