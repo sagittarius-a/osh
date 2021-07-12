@@ -66,6 +66,7 @@ fn perform_expansion(value: &str) -> String {
 
 fn main() -> Result<()> {
     // Initialize interactive prompt
+    let mut previous_directory = env::current_dir().unwrap();
     let mut rl = Editor::<()>::new();
     let homedir = match env::var("HOME") {
         Ok(val) => val,
@@ -127,10 +128,28 @@ fn main() -> Result<()> {
                                 None => &dir[..],
                             };
 
+                            let target;
+                            // Use "-" to go to the last directory visited
+                            if new_dir == "-" {
+                                target = previous_directory.to_str().unwrap();
+                            } else {
+                                target = new_dir;
+                            }
+
                             // Perform variable expansion
-                            let new_dir = perform_expansion(new_dir);
-                            if let Err(e) = env::set_current_dir(Path::new(&new_dir)) {
-                                eprintln!("{}", e);
+                            let target = perform_expansion(target);
+
+                            let dir_before_cd = env::current_dir().unwrap();
+
+                            if let Err(e) = env::set_current_dir(Path::new(&target)) {
+                                eprintln!("Error: {}", e);
+                                continue;
+                            }
+
+                            // Update the last directory if need be
+                            if env::current_dir().unwrap() != dir_before_cd {
+                                previous_directory =
+                                    Path::new(dir_before_cd.to_str().unwrap()).to_path_buf();
                             }
 
                             previous_command = None;
