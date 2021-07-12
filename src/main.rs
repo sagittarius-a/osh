@@ -62,10 +62,13 @@ fn main() -> Result<()> {
     let mut rl = Editor::<()>::new();
     let homedir = match env::var("HOME") {
         Ok(val) => val,
+        // Use /tmp as default directory if no $HOME directory has been found
+        // This way, the user can still use this feature, even if the history
+        // content won't survive reboots
+        // TODO: Avoid collision when used by multiple users (even without $USER)
         Err(_) => "/tmp".into(),
     };
     let history = homedir + "/.history";
-    println!("History: {}", history);
     let _ = rl.load_history(&history);
 
     loop {
@@ -74,6 +77,7 @@ fn main() -> Result<()> {
             Ok(d) => d,
             Err(e) => {
                 eprintln!("{}", e);
+                // Use empty prompt if current directory cannot be read from env
                 std::path::PathBuf::new()
             }
         };
