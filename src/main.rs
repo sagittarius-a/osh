@@ -336,6 +336,25 @@ fn main() -> Result<()> {
                             }
                             config.aliases.remove(request);
                         }
+                        // Edit configuration file
+                        "config" => {
+                            let editor = match env::var("EDITOR") {
+                                Ok(e) => e,
+                                Err(_) => {
+                                    eprintln!("EDITOR not set. Cannot open configuration file");
+                                    // TODO: set error code to 1
+                                    continue;
+                                }
+                            };
+
+                            let _ = Command::new(editor)
+                                .args(perform_expansion("~/.shell.yaml").split_whitespace())
+                                .stdin(Stdio::inherit())
+                                .stdout(Stdio::inherit())
+                                .spawn()
+                                .unwrap()
+                                .wait();
+                        }
                         // Show the content of an alias
                         "type" => {
                             let request = match args.next() {
