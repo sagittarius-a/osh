@@ -86,7 +86,11 @@ fn lookup_aliases(config: &ConfigFile, command: &str, args: &str) -> Option<Shel
 
     // If any args in the alias, prepend them to the list of arguments
     let alias_args = parts.into_iter().collect::<Vec<&str>>().join(" ");
-    let a = &format!("{} {}", alias_args, args);
+
+    let a = match args.is_empty() {
+        true => alias_args,
+        false => format!("{} {}", alias_args, args),
+    };
 
     Some(ShellCommand {
         command: c.to_string(),
