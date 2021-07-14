@@ -1,5 +1,7 @@
 use rustyline::error::ReadlineError;
 use rustyline::Editor;
+use serde;
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;
 use std::io::Result;
@@ -7,22 +9,77 @@ use std::io::{stdout, Write};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 
+macro_rules! debug {
+    ($config:ident) => {
+        if $config.debug {
+            print!("\n")
+        }
+    };
+    ($config:ident, $fmt:expr) => {
+        if $config.debug {
+            print!(concat!($fmt, "\n"));
+        }
+    };
+    ($config:ident, $fmt:expr, $($arg:tt)*) => {
+            if $config.debug {
+            print!(concat!($fmt, "\n"), $($arg)*)
+        }
+    };
+}
+
 struct ShellCommand {
     command: String,
     args: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct ConfigFile {
+    aliases: HashMap<String, String>,
+    #[serde(default = "default_prompt")]
+    prompt: String,
+    #[serde(default)]
+    debug: bool,
+}
+
+fn default_prompt() -> String {
+    "$".to_string()
+}
+
+impl ConfigFile {
+    fn new() -> ConfigFile {
+        let mut config_file: Option<ConfigFile> = None;
+
+        // Try to read the configuration file
+        match std::fs::File::open(perform_expansion("~/.shell.yaml")) {
+            Ok(f) => {
+                // Load aliases
+                config_file = serde_yaml::from_reader(f).unwrap();
+            }
+            Err(_) => {
+                eprintln!("Cannot open configuration file '~/.shell.yaml'");
+            }
+        };
+        match config_file {
+            Some(c) => {
+                debug!(c, "Config file: {:#?}", c);
+                c
+            }
+            None => ConfigFile {
+                aliases: HashMap::new(),
+                prompt: default_prompt(),
+                debug: false,
+            },
+        }
+    }
+}
+
 /// Replace the `command` with an alias if available.
-fn lookup_aliases(
-    aliases: &HashMap<String, String>,
-    command: &str,
-    args: &str,
-) -> Option<ShellCommand> {
-    if !aliases.contains_key(command) {
+fn lookup_aliases(config: &ConfigFile, command: &str, args: &str) -> Option<ShellCommand> {
+    if !config.aliases.contains_key(command) {
         return None;
     }
 
-    let mut c: &str = aliases.get_key_value(command).unwrap().1;
+    let mut c: &str = config.aliases.get_key_value(command).unwrap().1;
 
     let mut parts = c.trim().split_whitespace();
     c = parts.next().unwrap();
@@ -115,7 +172,7 @@ fn main() -> Result<()> {
     };
     let history = homedir + "/.history";
     let _ = rl.load_history(&history);
-    let mut aliases: HashMap<String, String> = HashMap::new();
+    let mut config = ConfigFile::new();
 
     loop {
         // Setup prompt
@@ -127,7 +184,11 @@ fn main() -> Result<()> {
                 std::path::PathBuf::new()
             }
         };
-        let prompt = format!("{} $ ", cwd.to_str().unwrap().replace("\"", ""));
+        let prompt = format!(
+            "{} {} ",
+            cwd.to_str().unwrap().replace("\"", ""),
+            config.prompt
+        );
         // Need to explicitly flush to ensure it prints before read_line
         stdout().flush().unwrap();
 
@@ -161,7 +222,7 @@ fn main() -> Result<()> {
                             let new_alias = match args.next() {
                                 Some(v) => v,
                                 None => {
-                                    list_aliases(&aliases);
+                                    list_aliases(&config.aliases);
                                     continue;
                                 }
                             };
@@ -169,7 +230,7 @@ fn main() -> Result<()> {
                             // Build the command by parsing the rest of the command provided
                             let aliased = args.into_iter().collect::<Vec<&str>>().join(" ");
 
-                            aliases.insert(new_alias.into(), aliased);
+                            config.aliases.insert(new_alias.into(), aliased);
                         }
                         // Show the content of an alias
                         "type" => {
@@ -181,7 +242,7 @@ fn main() -> Result<()> {
                                 }
                             };
 
-                            match aliases.get_key_value(request) {
+                            match config.aliases.get_key_value(request) {
                                 Some(c) => {
                                     println!("{} is an alias for {}", request, c.1);
                                 }
@@ -254,7 +315,7 @@ fn main() -> Result<()> {
 
                             // Use alias if available
                             let aliased;
-                            if let Some(shell_command) = lookup_aliases(&aliases, command, &args) {
+                            if let Some(shell_command) = lookup_aliases(&config, command, &args) {
                                 aliased = shell_command.command.to_owned();
                                 command = &aliased;
                                 args = shell_command.args;
