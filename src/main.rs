@@ -267,6 +267,24 @@ fn main() -> Result<()> {
 
                             config.aliases.insert(new_alias.into(), aliased);
                         }
+                        // Delete alias
+                        "unalias" => {
+                            // Fetch the name of the new alias or display availables aliases if not alias
+                            // has been found
+                            let request = match args.next() {
+                                Some(v) => v,
+                                None => {
+                                    eprintln!("No alias provided");
+                                    continue;
+                                }
+                            };
+
+                            if !config.aliases.contains_key(request) {
+                                eprintln!("{} is not an alias", request);
+                                continue;
+                            }
+                            config.aliases.remove(request);
+                        }
                         // Show the content of an alias
                         "type" => {
                             let request = match args.next() {
