@@ -1,7 +1,6 @@
 use console::style;
 use rustyline::error::ReadlineError;
 use rustyline::Editor;
-use serde;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;
@@ -101,7 +100,7 @@ fn lookup_aliases(config: &ConfigFile, command: &str, args: &str) -> Option<Shel
 
     Some(ShellCommand {
         command: c.to_string(),
-        args: a.to_string(),
+        args: a,
     })
 }
 
@@ -178,13 +177,10 @@ fn get_username() -> String {
 
 fn get_hostname() -> String {
     let mut hostname = String::new();
-    match std::fs::File::open("/etc/hostname") {
-        Ok(mut f) => {
-            let mut tmp = String::new();
-            f.read_to_string(&mut tmp).unwrap();
-            hostname = tmp.trim().into();
-        }
-        Err(_) => {}
+    if let Ok(mut f) = std::fs::File::open("/etc/hostname") {
+        let mut tmp = String::new();
+        f.read_to_string(&mut tmp).unwrap();
+        hostname = tmp.trim().into();
     };
     hostname
 }
@@ -259,13 +255,13 @@ fn main() -> Result<()> {
 
                 // read_line leaves a trailing newline, which trim removes
                 // this needs to be peekable so we can determine when we are on the last command
-                let mut commands = line.trim().split(" | ").peekable();
+                let commands = line.trim().split(" | ").peekable();
                 let mut previous_command = None;
 
                 // For each command, use an alias if available. It allows user to use aliases
                 // even in the commands following |
                 let mut resolved = Vec::new();
-                while let Some(command) = commands.next() {
+                for command in commands {
                     let mut parts = command.trim().split_whitespace();
                     let mut command = parts.next().unwrap();
                     let args = parts;
