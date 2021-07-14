@@ -355,6 +355,10 @@ fn main() -> Result<()> {
                                 .unwrap()
                                 .wait();
                         }
+                        // Reload configuration file
+                        "reload" => {
+                            config = ConfigFile::new();
+                        }
                         // Show the content of an alias
                         "type" => {
                             let request = match args.next() {
