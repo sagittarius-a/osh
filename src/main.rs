@@ -1,10 +1,48 @@
 use rustyline::error::ReadlineError;
 use rustyline::Editor;
+use std::collections::HashMap;
 use std::env;
 use std::io::Result;
 use std::io::{stdout, Write};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
+
+struct ShellCommand {
+    command: String,
+    args: String,
+}
+
+/// Replace the `command` with an alias if available.
+fn lookup_aliases(
+    aliases: &HashMap<String, String>,
+    command: &str,
+    args: &str,
+) -> Option<ShellCommand> {
+    if !aliases.contains_key(command) {
+        return None;
+    }
+
+    let mut c: &str = aliases.get_key_value(command).unwrap().1;
+
+    let mut parts = c.trim().split_whitespace();
+    c = parts.next().unwrap();
+
+    // If any args in the alias, prepend them to the list of arguments
+    let alias_args = parts.into_iter().collect::<Vec<&str>>().join(" ");
+    let a = &format!("{} {}", alias_args, args);
+
+    Some(ShellCommand {
+        command: c.to_string(),
+        args: a.to_string(),
+    })
+}
+
+/// Replace the `command` with an alias if available.
+fn list_aliases(aliases: &HashMap<String, String>) {
+    for (key, value) in aliases.iter() {
+        println!("{}: {}", key, value);
+    }
+}
 
 /// Perform environment variable expansion.
 // TODO: Expand ~
@@ -78,6 +116,7 @@ fn main() -> Result<()> {
     };
     let history = homedir + "/.history";
     let _ = rl.load_history(&history);
+    let mut aliases: HashMap<String, String> = HashMap::new();
 
     loop {
         // Setup prompt
@@ -113,9 +152,45 @@ fn main() -> Result<()> {
                     // everything after the first whitespace character is interpreted as args to the command
                     let mut parts = command.trim().split_whitespace();
                     let command = parts.next().unwrap();
-                    let args = parts;
+                    let mut args = parts;
 
                     match command {
+                        // Register a new alias
+                        "alias" => {
+                            // Fetch the name of the new alias or display availables aliases if not alias
+                            // has been found
+                            let new_alias = match args.next() {
+                                Some(v) => v,
+                                None => {
+                                    list_aliases(&aliases);
+                                    continue;
+                                }
+                            };
+
+                            // Build the command by parsing the rest of the command provided
+                            let aliased = args.into_iter().collect::<Vec<&str>>().join(" ");
+
+                            aliases.insert(new_alias.into(), aliased);
+                        }
+                        // Show the content of an alias
+                        "type" => {
+                            let request = match args.next() {
+                                Some(v) => v,
+                                None => {
+                                    // TODO: set error code to 1
+                                    continue;
+                                }
+                            };
+
+                            match aliases.get_key_value(request) {
+                                Some(c) => {
+                                    println!("{} is an alias for {}", request, c.1);
+                                }
+                                None => {
+                                    println!("{} not found", request);
+                                }
+                            }
+                        }
                         "cd" => {
                             // default to '~' of '/' as new directory if one was not provided
                             let dir = match env::var("HOME") {
@@ -155,7 +230,7 @@ fn main() -> Result<()> {
                             previous_command = None;
                         }
                         "exit" => return Ok(()),
-                        command => {
+                        mut command => {
                             let stdin = previous_command
                                 .map_or(Stdio::inherit(), |output: Child| {
                                     Stdio::from(output.stdout.unwrap())
@@ -176,7 +251,15 @@ fn main() -> Result<()> {
                             for a in args {
                                 to_expand.push(a);
                             }
-                            let args = perform_expansion(&to_expand.join(" "));
+                            let mut args = perform_expansion(&to_expand.join(" "));
+
+                            // Use alias if available
+                            let aliased;
+                            if let Some(shell_command) = lookup_aliases(&aliases, command, &args) {
+                                aliased = shell_command.command.to_owned();
+                                command = &aliased;
+                                args = shell_command.args;
+                            }
 
                             let output = Command::new(command)
                                 .args(args.split_whitespace())
