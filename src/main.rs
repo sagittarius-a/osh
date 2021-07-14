@@ -324,6 +324,9 @@ fn main() -> Result<()> {
                                 args = shell_command.args;
                             }
 
+                            debug!(config, ">>> command = {}", command);
+                            debug!(config, ">>> args = '{}'", args);
+
                             let output = Command::new(command)
                                 .args(args.split_whitespace())
                                 .stdin(stdin)
