@@ -1,3 +1,4 @@
+use console::style;
 use rustyline::error::ReadlineError;
 use rustyline::Editor;
 use serde;
@@ -5,7 +6,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;
 use std::io::Result;
-use std::io::{stdout, Write};
+use std::io::{stdout, Read, Write};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 
@@ -39,6 +40,10 @@ struct ConfigFile {
     prompt: String,
     #[serde(default)]
     debug: bool,
+    #[serde(default = "get_username")]
+    username: String,
+    #[serde(default = "get_hostname")]
+    hostname: String,
 }
 
 fn default_prompt() -> String {
@@ -68,6 +73,8 @@ impl ConfigFile {
                 aliases: HashMap::new(),
                 prompt: default_prompt(),
                 debug: false,
+                username: get_username(),
+                hostname: get_hostname(),
             },
         }
     }
@@ -161,6 +168,63 @@ fn perform_expansion(value: &str) -> String {
     expanded
 }
 
+fn get_username() -> String {
+    let mut username = String::new();
+    if let Ok(u) = env::var("USERNAME") {
+        username = u;
+    };
+    username
+}
+
+fn get_hostname() -> String {
+    let mut hostname = String::new();
+    match std::fs::File::open("/etc/hostname") {
+        Ok(mut f) => {
+            let mut tmp = String::new();
+            f.read_to_string(&mut tmp).unwrap();
+            hostname = tmp.trim().into();
+        }
+        Err(_) => {}
+    };
+    hostname
+}
+// Prompt format: user@host pwd
+//                green     blue
+fn build_prompt(config: &ConfigFile) -> String {
+    let mut prompt = String::new();
+
+    // Fetch current directory
+    let cwd = match env::current_dir() {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("{}", e);
+            // Use empty value if current directory cannot be read from env
+            // It is very unlikely but who knows
+            std::path::PathBuf::new()
+        }
+    };
+
+    debug!(config, "cwd: {:?}", cwd);
+    debug!(config, "config.username: {:?}", config.username);
+
+    if !config.username.is_empty() {
+        prompt += &style(&config.username).green().to_string();
+    }
+    if !config.hostname.is_empty() {
+        prompt += &style(format!("@{} ", &config.hostname)).green().to_string();
+    }
+    prompt += &format!(
+        "{} {} ",
+        style(cwd.to_str().unwrap().replace("\"", ""))
+            .blue()
+            .bold()
+            .to_string(),
+        config.prompt
+    );
+
+    prompt
+}
+
 fn main() -> Result<()> {
     // Initialize interactive prompt
     let mut previous_directory = env::current_dir().unwrap();
@@ -178,20 +242,7 @@ fn main() -> Result<()> {
     let mut config = ConfigFile::new();
 
     loop {
-        // Setup prompt
-        let cwd = match env::current_dir() {
-            Ok(d) => d,
-            Err(e) => {
-                eprintln!("{}", e);
-                // Use empty prompt if current directory cannot be read from env
-                std::path::PathBuf::new()
-            }
-        };
-        let prompt = format!(
-            "{} {} ",
-            cwd.to_str().unwrap().replace("\"", ""),
-            config.prompt
-        );
+        let prompt = build_prompt(&config);
         // Need to explicitly flush to ensure it prints before read_line
         stdout().flush().unwrap();
 
