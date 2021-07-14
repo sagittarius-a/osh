@@ -45,7 +45,6 @@ fn list_aliases(aliases: &HashMap<String, String>) {
 }
 
 /// Perform environment variable expansion.
-// TODO: Expand ~
 fn perform_expansion(value: &str) -> String {
     // Early exit if not variable to expand is found
     if !value.contains('$') {
