@@ -98,7 +98,6 @@ fn lookup_aliases(config: &ConfigFile, command: &str, args: &str) -> Option<Shel
     })
 }
 
-/// Replace the `command` with an alias if available.
 fn list_aliases(aliases: &HashMap<String, String>) {
     for (key, value) in aliases.iter() {
         println!("{}: {}", key, value);
