@@ -211,6 +211,38 @@ fn main() -> Result<()> {
                 let mut commands = line.trim().split(" | ").peekable();
                 let mut previous_command = None;
 
+                // For each command, use an alias if available. It allows user to use aliases
+                // even in the commands following |
+                let mut resolved = Vec::new();
+                while let Some(command) = commands.next() {
+                    let mut parts = command.trim().split_whitespace();
+                    let mut command = parts.next().unwrap();
+                    let args = parts;
+                    let aliased;
+
+                    // Perform environment variable expansion
+                    let mut to_expand = Vec::new();
+                    for a in args {
+                        to_expand.push(a);
+                    }
+                    let mut args = perform_expansion(&to_expand.join(" "));
+
+                    if let Some(shell_command) = lookup_aliases(&config, command, &args) {
+                        aliased = shell_command.command.to_owned();
+                        command = &aliased;
+                        args = shell_command.args;
+                    }
+
+                    let c = format!("{} {}", command, args);
+                    resolved.push(c);
+                }
+
+                // Reconstruct the command line with alias resolved
+                let aliases_resolved_line = resolved.join(" | ");
+
+                // Parse the new command line
+                let mut commands = aliases_resolved_line.trim().split(" | ").peekable();
+
                 while let Some(command) = commands.next() {
                     // everything after the first whitespace character is interpreted as args to the command
                     let mut parts = command.trim().split_whitespace();
@@ -293,7 +325,7 @@ fn main() -> Result<()> {
                             previous_command = None;
                         }
                         "exit" => return Ok(()),
-                        mut command => {
+                        command => {
                             let stdin = previous_command
                                 .map_or(Stdio::inherit(), |output: Child| {
                                     Stdio::from(output.stdout.unwrap())
@@ -314,15 +346,7 @@ fn main() -> Result<()> {
                             for a in args {
                                 to_expand.push(a);
                             }
-                            let mut args = perform_expansion(&to_expand.join(" "));
-
-                            // Use alias if available
-                            let aliased;
-                            if let Some(shell_command) = lookup_aliases(&config, command, &args) {
-                                aliased = shell_command.command.to_owned();
-                                command = &aliased;
-                                args = shell_command.args;
-                            }
+                            let args = perform_expansion(&to_expand.join(" "));
 
                             debug!(config, ">>> command = {}", command);
                             debug!(config, ">>> args = '{}'", args);
