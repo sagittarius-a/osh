@@ -1,6 +1,11 @@
 [package]
 name = "bubble-shell"
 version = "0.1.0"
-authors = ["Josh Mcguigan"]
+authors = ["Sagittarius-a", "Josh Mcguigan"]
+edition = "2018"
 
 [dependencies]
+rustyline = "8.2.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.8"
+console = "0.14.1"
