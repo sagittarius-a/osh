@@ -4,13 +4,14 @@ use rustyline::Editor;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;
+use std::fs::OpenOptions;
 use std::io::Result;
 use std::io::{stdout, Read, Write};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 
 use log::LevelFilter;
-use log::{info, trace, warn};
+use log::{info, warn};
 use log4rs::append::file::FileAppender;
 use log4rs::config::{Appender, Config, Root};
 use log4rs::encode::pattern::PatternEncoder;
@@ -85,6 +86,42 @@ impl ConfigFile {
     }
 }
 
+/// Redirect stdout and/or stderr to a file
+fn redirect(command: &str, output: &std::process::Output) {
+    let filename;
+    let mut file_options = OpenOptions::new();
+
+    // Set default permissions
+    file_options.write(true);
+
+    let mut content = String::from_utf8_lossy(&output.stdout);
+
+    let mut parts = command.split('>');
+
+    // Determine if stderr needs to be redirected as well
+    if parts.next().unwrap().ends_with('2') {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        content += stderr;
+    }
+
+    // Determine if the file must be truncated or if the content should be
+    // appended
+    if command.contains(">>") {
+        file_options.append(true);
+        filename = command.split(">>").nth(1).unwrap().trim();
+    } else {
+        file_options.truncate(true);
+        file_options.create(true);
+        filename = command.split('>').nth(1).unwrap().trim();
+    }
+
+    let mut file = file_options
+        .open(filename)
+        .unwrap_or_else(|_| panic!("Failed to open {} to redirect content to it", filename));
+    write!(file, "{}", content)
+        .unwrap_or_else(|_| panic!("Failed to write content to redirect to {}", filename));
+}
+
 fn setup_logging() {
     // https://docs.rs/log4rs/1.0.0/log4rs/encode/pattern/index.html
     let logfile = FileAppender::builder()
@@ -98,8 +135,6 @@ fn setup_logging() {
         .unwrap();
 
     log4rs::init_config(config).unwrap();
-
-    info!("Successfully configured logging");
 }
 
 /// Replace the `command` with an alias if available.
@@ -267,8 +302,7 @@ fn main() -> Result<()> {
         // Need to explicitly flush to ensure it prints before read_line
         stdout().flush().unwrap();
 
-        let readline = rl.readline(&prompt);
-        match readline {
+        match rl.readline(&prompt) {
             Ok(line) => {
                 if line.is_empty() {
                     continue;
@@ -444,22 +478,31 @@ fn main() -> Result<()> {
                                     Stdio::from(output.stdout.unwrap())
                                 });
 
-                            let stdout = if commands.peek().is_some() {
-                                // there is another command piped behind this one
-                                // prepare to send output to the next command
-                                Stdio::piped()
-                            } else {
-                                // there are no more commands piped behind this one
-                                // send output to shell stdout
-                                Stdio::inherit()
-                            };
-
                             // Perform environment variable expansion
                             let mut to_expand = Vec::new();
                             for a in args {
                                 to_expand.push(a);
                             }
-                            let args = perform_expansion(&to_expand.join(" "));
+                            let mut args = perform_expansion(&to_expand.join(" "));
+
+                            let has_and = args.contains("&&");
+                            let has_redirection = args.contains('>');
+                            let has_or = args.contains("&&");
+
+                            // Assume there are no more commands piped behind this one
+                            // send output to shell stdout
+                            let mut stdout = Stdio::inherit();
+                            let mut stderr = Stdio::inherit();
+                            if commands.peek().is_some() {
+                                // there is another command piped behind this one
+                                // prepare to send output to the next command
+                                stdout = Stdio::piped();
+                                stderr = Stdio::piped();
+                            } else if has_redirection {
+                                args = args.split('>').next().unwrap().to_string();
+                                stdout = Stdio::piped();
+                                stderr = Stdio::piped();
+                            }
 
                             debug!(config, ">>> command = {}", command);
                             debug!(config, ">>> args = '{}'", args);
@@ -468,11 +511,22 @@ fn main() -> Result<()> {
                                 .args(args.split_whitespace())
                                 .stdin(stdin)
                                 .stdout(stdout)
+                                .stderr(stderr)
                                 .spawn();
 
                             match output {
                                 Ok(output) => {
-                                    previous_command = Some(output);
+                                    // Process redirection if need be
+                                    if has_redirection {
+                                        let o = &output
+                                            .wait_with_output()
+                                            .expect("failed to wait on child");
+
+                                        redirect(&line, o);
+                                        previous_command = None;
+                                    } else {
+                                        previous_command = Some(output);
+                                    }
                                 }
                                 Err(e) => {
                                     previous_command = None;
