@@ -9,6 +9,12 @@ use std::io::{stdout, Read, Write};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 
+use log::LevelFilter;
+use log::{info, trace, warn};
+use log4rs::append::file::FileAppender;
+use log4rs::config::{Appender, Config, Root};
+use log4rs::encode::pattern::PatternEncoder;
+
 macro_rules! debug {
     ($config:ident) => {
         if $config.debug {
@@ -77,6 +83,23 @@ impl ConfigFile {
             },
         }
     }
+}
+
+fn setup_logging() {
+    // https://docs.rs/log4rs/1.0.0/log4rs/encode/pattern/index.html
+    let logfile = FileAppender::builder()
+        .encoder(Box::new(PatternEncoder::new("{l} - {m}\n")))
+        .build("/tmp/shell.log")
+        .unwrap();
+
+    let config = Config::builder()
+        .appender(Appender::builder().build("logfile", Box::new(logfile)))
+        .build(Root::builder().appender("logfile").build(LevelFilter::Info))
+        .unwrap();
+
+    log4rs::init_config(config).unwrap();
+
+    info!("Successfully configured logging");
 }
 
 /// Replace the `command` with an alias if available.
@@ -222,6 +245,8 @@ fn build_prompt(config: &ConfigFile) -> String {
 }
 
 fn main() -> Result<()> {
+    setup_logging();
+
     // Initialize interactive prompt
     let mut previous_directory = env::current_dir().unwrap();
     let mut rl = Editor::<()>::new();
