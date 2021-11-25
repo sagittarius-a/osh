@@ -208,6 +208,8 @@ fn perform_expansion(value: &str) -> String {
                     println!("    Still some more element {}", iter_slash.peek().unwrap());
                     result.push('/'.into());
                 }
+            } else {
+                result.push(element.to_string());
             }
         }
 
