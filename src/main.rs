@@ -376,6 +376,9 @@ fn build_commands(words: Vec<String>) -> Vec<ShellCommand> {
         if w.eq("|") {
             parts.push((current, true));
             current = Vec::new();
+        } else if w.eq(";") {
+            parts.push((current, false));
+            current = Vec::new();
         } else {
             current.push(w)
         }
