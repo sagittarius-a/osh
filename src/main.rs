@@ -720,7 +720,7 @@ fn main() -> rustyline::Result<()> {
                                 Some(v) => v.clone(),
                                 None => {
                                     list_aliases(&config.aliases);
-                                    status = 1;
+                                    status = 0;
                                     continue 'shell;
                                 }
                             };
