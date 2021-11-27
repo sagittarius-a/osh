@@ -702,7 +702,7 @@ fn main() -> rustyline::Result<()> {
                 rl.save_history(&history).unwrap();
 
                 let commands = shell_words::split(&line).expect("Failed to split command line");
-
+                let is_unalias_command = commands[0].eq("unalias");
                 let mut previous_command = None;
 
                 // For each command, use an alias if available. It allows user to use aliases
@@ -710,17 +710,31 @@ fn main() -> rustyline::Result<()> {
                 let mut resolved = Vec::new();
                 for command in commands {
                     let expanded = perform_expansion_on_single_element(&command);
-                    resolved.push(expanded);
+
+                    if !is_unalias_command {
+                        // If we've found an alias, resolve it and parse the resolved string as a new
+                        // command, since it can be composed of several words
+                        if let Some(resolved_alias) = lookup_aliases(&config, &expanded) {
+                            let parts = shell_words::split(&resolved_alias).expect("Failed to split resolved alias");
+                            for part in parts {
+                                resolved.push(part);
+                            }
+                        } else {
+                            // If no alias has been found, simply use the word as is
+                            resolved.push(expanded);
+                        }
+                    } else {
+                        // Make sure to keep values as is if we/re trying to remove an alias
+                        resolved.push(expanded);
+                    }
                 }
 
                 // Now the command line has been preprocessed, split it in several commands to
                 // execute
                 let shell_commands = build_commands(resolved);
-
                 for mut shell_command in shell_commands {
                     let mut command = shell_command.command;
 
-                    // Handle alias related commands first
                     match &command[..] {
                         "alias" => {
                             // Register a new alias
@@ -739,8 +753,7 @@ fn main() -> rustyline::Result<()> {
 
                             config.aliases.insert(new_alias, aliased);
                             status = 0;
-                        }
-
+                        },
                         "unalias" => {
                             // Fetch the name of the new alias or display available aliases if not alias
                             // has been found
@@ -760,32 +773,7 @@ fn main() -> rustyline::Result<()> {
                                 continue 'shell;
                             }
                             config.aliases.remove(request);
-                        }
-                        _ => (),
-                    }
-
-                    // Now we're sure the command do not deal with alias, we can perform global
-                    // alias resolving pretty safely
-                    // Some nasty things could happen if the alias contains space separated value,
-                    // but this is the user's responsibility
-                    if let Some(aliased) = lookup_aliases(&config, &command) {
-                        let aliased_parts = aliased
-                            .split(' ')
-                            .map(|a| a.to_string())
-                            .collect::<Vec<String>>();
-                        // If the alias contained space separated values, treat it as a command
-                        // with arguments, that will be prepended to the original list of arguments
-                        if aliased_parts.len() > 1 {
-                            let mut new_args = Vec::new();
-                            new_args.extend_from_slice(&aliased_parts[1..]);
-                            new_args.extend_from_slice(&shell_command.args);
-                            shell_command.args = new_args;
-                        }
-                        // Update command to execute
-                        command = aliased_parts[0].to_string();
-                    }
-
-                    match &command[..] {
+                        },
                         "config" => {
                             let editor = match env::var("EDITOR") {
                                 Ok(e) => e,
