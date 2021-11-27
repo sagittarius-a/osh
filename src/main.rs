@@ -630,31 +630,12 @@ fn build_prompt(config: &ConfigFile, status: u32) -> String {
     prompt
 }
 
-fn main() -> rustyline::Result<()> {
-    setup_logging();
-
-    // Initialize interactive prompt
+fn shell_loop(config: Config, helper: MyHelper) -> rustyline::Result<()> {
     let mut previous_directory = env::current_dir().unwrap();
-
-    let config = Config::builder()
-        .history_ignore_space(true)
-        .completion_type(CompletionType::List)
-        .tab_stop(4)
-        .edit_mode(EditMode::Emacs)
-        .output_stream(OutputStreamType::Stdout)
-        .build();
-
-    let h = MyHelper {
-        completer: MyFilenameCompleter::new(),
-        highlighter: MatchingBracketHighlighter::new(),
-        hinter: HistoryHinter {},
-        colored_prompt: ">>>".to_owned(),
-        validator: MatchingBracketValidator::new(),
-    };
 
     // let mut rl = Editor::<()>::new();
     let mut rl = Editor::with_config(config);
-    rl.set_helper(Some(h));
+    rl.set_helper(Some(helper));
 
     // Add custom keybindings to provide better user experience
     // It basically mimics features provided by various shell plugins
@@ -965,4 +946,27 @@ fn main() -> rustyline::Result<()> {
     rl.save_history(&history).unwrap();
 
     Ok(())
+}
+
+fn main() -> rustyline::Result<()> {
+    setup_logging();
+
+    // Initialize interactive prompt
+    let config = Config::builder()
+        .history_ignore_space(true)
+        .completion_type(CompletionType::List)
+        .tab_stop(4)
+        .edit_mode(EditMode::Emacs)
+        .output_stream(OutputStreamType::Stdout)
+        .build();
+
+    let h = MyHelper {
+        completer: MyFilenameCompleter::new(),
+        highlighter: MatchingBracketHighlighter::new(),
+        hinter: HistoryHinter {},
+        colored_prompt: ">>>".to_owned(),
+        validator: MatchingBracketValidator::new(),
+    };
+
+    shell_loop(config, h)
 }
