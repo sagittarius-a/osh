@@ -58,10 +58,12 @@ macro_rules! wdebug {
 
 macro_rules! werror {
     ($fmt:expr) => {
+        eprint!("{}", &style("Error: ").red().to_string());
         eprint!(concat!($fmt, "\n"));
         error!($fmt);
     };
     ($fmt:expr, $($arg:tt)*) => {
+        eprint!("{}", &style("Error: ").red().to_string());
         eprint!(concat!($fmt, "\n"), $($arg)*);
         error!($fmt, $($arg)*);
     };
@@ -80,11 +82,13 @@ macro_rules! winfo {
 
 macro_rules! wwarning {
     ($fmt:expr) => {
-        print!(concat!("Warning: ", $fmt, "\n"));
+        print!("{}", &style("Warning: ").yellow().to_string());
+        print!(concat!($fmt, "\n"));
         warn!($fmt);
     };
     ($fmt:expr, $($arg:tt)*) => {
-        print!(concat!("Warning: ", $fmt, "\n"), $($arg)*);
+        print!("{}", &style("Warning: ").yellow().to_string());
+        print!(concat!($fmt, "\n"), $($arg)*);
         warn!($fmt, $($arg)*);
     };
 }
