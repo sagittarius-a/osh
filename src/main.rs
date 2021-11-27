@@ -794,6 +794,9 @@ fn main() -> rustyline::Result<()> {
                                 .unwrap()
                                 .wait();
 
+                            config = ConfigFile::new();
+                            winfo!("Configuration file reloaded");
+
                             status = 0;
                         }
                         "reload" => {
