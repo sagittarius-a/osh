@@ -4,6 +4,7 @@ use std::borrow::Cow::{self, Borrowed, Owned};
 use std::env::current_dir;
 use std::fs;
 use std::path::{self, Path};
+use std::env::{set_var, remove_var};
 
 use rustyline::completion::{escape, extract_word, unescape, Completer, Pair, Quote};
 use rustyline::config::OutputStreamType;
@@ -736,6 +737,42 @@ fn main() -> rustyline::Result<()> {
                     let command = shell_command.command;
 
                     match &command[..] {
+                        "export" => {
+                            let mut args = shell_command.args.iter();
+                            let env_var = match args.next() {
+                                Some(v) => v.clone(),
+                                None => {
+                                    werror!("No environment variable provided");
+                                    status = 1;
+                                    continue 'shell;
+                                }
+                            };
+
+                            match args.next() {
+                                Some(v) => {
+                                    set_var(env_var, v);
+                                }
+                                None => {
+                                    remove_var(env_var);
+
+                                }
+                            };
+
+                            status = 0;
+                        }
+                        "unset" => {
+                            let mut args = shell_command.args.iter();
+                            match args.next() {
+                                Some(v) => {
+                                    remove_var(v);
+                                }
+                                None => {
+                                    werror!("No environment variable provided");
+                                    status = 1;
+                                    continue 'shell;
+                                }
+                            };
+                        }
                         "alias" => {
                             // Register a new alias
                             let mut args = shell_command.args.iter();
