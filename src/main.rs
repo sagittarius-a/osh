@@ -732,8 +732,8 @@ fn main() -> rustyline::Result<()> {
                 // Now the command line has been preprocessed, split it in several commands to
                 // execute
                 let shell_commands = build_commands(resolved);
-                for mut shell_command in shell_commands {
-                    let mut command = shell_command.command;
+                for shell_command in shell_commands {
+                    let command = shell_command.command;
 
                     match &command[..] {
                         "alias" => {
