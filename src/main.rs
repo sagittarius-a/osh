@@ -383,7 +383,9 @@ fn build_commands(words: Vec<String>) -> Vec<ShellCommand> {
             current.push(w)
         }
     }
-    parts.push((current, false));
+    if !current.is_empty() {
+        parts.push((current, false));
+    }
 
     for part in parts {
         if part.0.len() > 1 {
@@ -412,7 +414,7 @@ fn build_commands(words: Vec<String>) -> Vec<ShellCommand> {
                 command: part.0[0].to_string(),
                 args: Vec::new(),
                 redirection: Redirection::None,
-                piped: false,
+                piped: part.1,
             });
         }
     }
@@ -515,7 +517,7 @@ fn setup_logging() {
 
     let config = LogConfig::builder()
         .appender(Appender::builder().build("logfile", Box::new(logfile)))
-        .build(Root::builder().appender("logfile").build(LevelFilter::Info))
+        .build(Root::builder().appender("logfile").build(LevelFilter::Debug))
         .unwrap();
 
     log4rs::init_config(config).unwrap();
@@ -870,29 +872,43 @@ fn main() -> rustyline::Result<()> {
                                 stderr = Stdio::piped();
                             }
 
-                            let output = Command::new(c)
+                            wdebug!(config, "Command            : {}", c);
+                            wdebug!(config, "Command args       : {:#?}", &shell_command.args);
+                            wdebug!(config, "Command piped      : {}", &shell_command.piped);
+                            wdebug!(config, "Command redirection: {:#?}", &shell_command.redirection);
+
+                            let child = Command::new(c)
                                 .args(shell_command.args)
                                 .stdin(stdin)
                                 .stdout(stdout)
                                 .stderr(stderr)
                                 .spawn();
 
-                            match output {
-                                Ok(output) => {
+                            match child {
+                                Ok(child) => {
                                     status = 0;
 
-                                    // Process redirection if need be
-                                    if shell_command.redirection != Redirection::None {
-                                        let _o = &output
-                                            .wait_with_output()
-                                            .expect("failed to wait on child");
-
-                                        wwarning!("TODO: manage redirection");
-                                        // redirect(&line, o);
+                                    if !shell_command.piped {
+                                        child.wait_with_output().expect("failed to wait on child");
                                         previous_command = None;
                                     } else {
-                                        previous_command = Some(output);
+                                        previous_command = Some(child);
                                     }
+
+                                    // // Process redirection if need be
+                                    // if shell_command.redirection != Redirection::None {
+                                    //     let _o = &child
+                                    //         .wait_with_output()
+                                    //         .expect("failed to wait on child");
+                                    //
+                                    //     wwarning!("TODO: manage redirection");
+                                    //     // redirect(&line, o);
+                                    //     previous_command = None;
+                                    //     previous_command = Some(child);
+                                    // } else {
+                                    //     println!("Previous command = {:#?}", &child);
+                                    //     previous_command = Some(child);
+                                    // }
                                 }
                                 Err(e) => {
                                     previous_command = None;
@@ -902,10 +918,6 @@ fn main() -> rustyline::Result<()> {
                             };
                         }
                     }
-                }
-                if let Some(mut final_command) = previous_command {
-                    // block until the final command has finished
-                    final_command.wait().unwrap();
                 }
             }
             Err(ReadlineError::Interrupted) => (),
