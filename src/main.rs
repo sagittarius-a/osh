@@ -2,7 +2,9 @@ use console::style;
 
 use std::borrow::Cow::{self, Borrowed, Owned};
 use std::env::current_dir;
+use std::env::{remove_var, set_var};
 use std::fs;
+use std::io;
 use std::path::{self, Path};
 
 use rustyline::completion::{escape, extract_word, unescape, Completer, Pair, Quote};
@@ -58,10 +60,12 @@ macro_rules! wdebug {
 
 macro_rules! werror {
     ($fmt:expr) => {
+        eprint!("{}", &style("Error: ").red().to_string());
         eprint!(concat!($fmt, "\n"));
         error!($fmt);
     };
     ($fmt:expr, $($arg:tt)*) => {
+        eprint!("{}", &style("Error: ").red().to_string());
         eprint!(concat!($fmt, "\n"), $($arg)*);
         error!($fmt, $($arg)*);
     };
@@ -80,11 +84,13 @@ macro_rules! winfo {
 
 macro_rules! wwarning {
     ($fmt:expr) => {
-        print!(concat!("Warning: ", $fmt, "\n"));
+        print!("{}", &style("Warning: ").yellow().to_string());
+        print!(concat!($fmt, "\n"));
         warn!($fmt);
     };
     ($fmt:expr, $($arg:tt)*) => {
-        print!(concat!("Warning: ", $fmt, "\n"), $($arg)*);
+        print!("{}", &style("Warning: ").yellow().to_string());
+        print!(concat!($fmt, "\n"), $($arg)*);
         warn!($fmt, $($arg)*);
     };
 }
@@ -376,11 +382,16 @@ fn build_commands(words: Vec<String>) -> Vec<ShellCommand> {
         if w.eq("|") {
             parts.push((current, true));
             current = Vec::new();
+        } else if w.eq(";") {
+            parts.push((current, false));
+            current = Vec::new();
         } else {
             current.push(w)
         }
     }
-    parts.push((current, false));
+    if !current.is_empty() {
+        parts.push((current, false));
+    }
 
     for part in parts {
         if part.0.len() > 1 {
@@ -409,7 +420,7 @@ fn build_commands(words: Vec<String>) -> Vec<ShellCommand> {
                 command: part.0[0].to_string(),
                 args: Vec::new(),
                 redirection: Redirection::None,
-                piped: false,
+                piped: part.1,
             });
         }
     }
@@ -512,7 +523,11 @@ fn setup_logging() {
 
     let config = LogConfig::builder()
         .appender(Appender::builder().build("logfile", Box::new(logfile)))
-        .build(Root::builder().appender("logfile").build(LevelFilter::Info))
+        .build(
+            Root::builder()
+                .appender("logfile")
+                .build(LevelFilter::Debug),
+        )
         .unwrap();
 
     log4rs::init_config(config).unwrap();
@@ -553,6 +568,43 @@ fn perform_expansion_on_single_element(value: &str) -> String {
     result
 }
 
+fn perform_wildcard_expansion(value: &str) -> Option<Vec<String>> {
+    let mut result = Vec::new();
+
+    if !value.contains("*") {
+        return None;
+    }
+
+    let mut dir = ".";
+    // If the user supplied a directory to perform wildcard expansion into, fetch the directory name
+    if value.contains("/*") {
+        if value.eq("/*") {
+            dir = "/";
+        } else {
+            dir = value
+                .split("/*")
+                .collect::<Vec<&str>>()
+                .iter()
+                .next()
+                .expect("Failed to identify directory where wildcard expansion must be performed");
+        }
+    }
+
+    let mut entries = fs::read_dir(dir)
+        .unwrap()
+        .map(|res| res.map(|e| e.path().to_str().unwrap().to_string()))
+        .collect::<Result<Vec<String>, io::Error>>()
+        .unwrap();
+
+    // The order in which `read_dir` returns entries is not guaranteed. If reproducible
+    // ordering is required the entries should be explicitly sorted.
+    entries.sort();
+
+    for entry in entries.iter() {
+        result.push(entry.to_string());
+    }
+    Some(result)
+}
 fn get_username() -> String {
     let mut username = String::new();
     if let Ok(u) = env::var("USERNAME") {
@@ -620,31 +672,12 @@ fn build_prompt(config: &ConfigFile, status: u32) -> String {
     prompt
 }
 
-fn main() -> rustyline::Result<()> {
-    setup_logging();
-
-    // Initialize interactive prompt
+fn shell_loop(config: Config, helper: MyHelper) -> rustyline::Result<()> {
     let mut previous_directory = env::current_dir().unwrap();
-
-    let config = Config::builder()
-        .history_ignore_space(true)
-        .completion_type(CompletionType::List)
-        .tab_stop(4)
-        .edit_mode(EditMode::Emacs)
-        .output_stream(OutputStreamType::Stdout)
-        .build();
-
-    let h = MyHelper {
-        completer: MyFilenameCompleter::new(),
-        highlighter: MatchingBracketHighlighter::new(),
-        hinter: HistoryHinter {},
-        colored_prompt: ">>>".to_owned(),
-        validator: MatchingBracketValidator::new(),
-    };
 
     // let mut rl = Editor::<()>::new();
     let mut rl = Editor::with_config(config);
-    rl.set_helper(Some(h));
+    rl.set_helper(Some(helper));
 
     // Add custom keybindings to provide better user experience
     // It basically mimics features provided by various shell plugins
@@ -693,7 +726,7 @@ fn main() -> rustyline::Result<()> {
                 rl.save_history(&history).unwrap();
 
                 let commands = shell_words::split(&line).expect("Failed to split command line");
-
+                let is_unalias_command = commands[0].eq("unalias");
                 let mut previous_command = None;
 
                 // For each command, use an alias if available. It allows user to use aliases
@@ -701,18 +734,76 @@ fn main() -> rustyline::Result<()> {
                 let mut resolved = Vec::new();
                 for command in commands {
                     let expanded = perform_expansion_on_single_element(&command);
-                    resolved.push(expanded);
+
+                    if !is_unalias_command {
+                        // If we've found an alias, resolve it and parse the resolved string as a new
+                        // command, since it can be composed of several words
+                        if let Some(resolved_alias) = lookup_aliases(&config, &expanded) {
+                            let parts = shell_words::split(&resolved_alias)
+                                .expect("Failed to split resolved alias");
+                            for part in parts {
+                                resolved.push(part);
+                            }
+                        } else if let Some(wildcard_expanded) =
+                            perform_wildcard_expansion(&expanded)
+                        {
+                            for w in wildcard_expanded.iter() {
+                                resolved.push(w.to_string());
+                            }
+                        } else {
+                            // If no alias has been found, no wildcard expanded, simply use the
+                            // word as is
+                            resolved.push(expanded);
+                        }
+                    } else {
+                        // We're dealing with "unalias" command so we need to make sure to keep
+                        // value as is
+                        resolved.push(expanded);
+                    }
                 }
 
                 // Now the command line has been preprocessed, split it in several commands to
                 // execute
                 let shell_commands = build_commands(resolved);
+                for shell_command in shell_commands {
+                    let command = shell_command.command;
 
-                for mut shell_command in shell_commands {
-                    let mut command = shell_command.command;
-
-                    // Handle alias related commands first
                     match &command[..] {
+                        "export" => {
+                            let mut args = shell_command.args.iter();
+                            let env_var = match args.next() {
+                                Some(v) => v.clone(),
+                                None => {
+                                    werror!("No environment variable provided");
+                                    status = 1;
+                                    continue 'shell;
+                                }
+                            };
+
+                            match args.next() {
+                                Some(v) => {
+                                    set_var(env_var, v);
+                                }
+                                None => {
+                                    remove_var(env_var);
+                                }
+                            };
+
+                            status = 0;
+                        }
+                        "unset" => {
+                            let mut args = shell_command.args.iter();
+                            match args.next() {
+                                Some(v) => {
+                                    remove_var(v);
+                                }
+                                None => {
+                                    werror!("No environment variable provided");
+                                    status = 1;
+                                    continue 'shell;
+                                }
+                            };
+                        }
                         "alias" => {
                             // Register a new alias
                             let mut args = shell_command.args.iter();
@@ -731,7 +822,6 @@ fn main() -> rustyline::Result<()> {
                             config.aliases.insert(new_alias, aliased);
                             status = 0;
                         }
-
                         "unalias" => {
                             // Fetch the name of the new alias or display available aliases if not alias
                             // has been found
@@ -752,31 +842,6 @@ fn main() -> rustyline::Result<()> {
                             }
                             config.aliases.remove(request);
                         }
-                        _ => (),
-                    }
-
-                    // Now we're sure the command do not deal with alias, we can perform global
-                    // alias resolving pretty safely
-                    // Some nasty things could happen if the alias contains space separated value,
-                    // but this is the user's responsibility
-                    if let Some(aliased) = lookup_aliases(&config, &command) {
-                        let aliased_parts = aliased
-                            .split(' ')
-                            .map(|a| a.to_string())
-                            .collect::<Vec<String>>();
-                        // If the alias contained space separated values, treat it as a command
-                        // with arguments, that will be prepended to the original list of arguments
-                        if aliased_parts.len() > 1 {
-                            let mut new_args = Vec::new();
-                            new_args.extend_from_slice(&aliased_parts[1..]);
-                            new_args.extend_from_slice(&shell_command.args);
-                            shell_command.args = new_args;
-                        }
-                        // Update command to execute
-                        command = aliased_parts[0].to_string();
-                    }
-
-                    match &command[..] {
                         "config" => {
                             let editor = match env::var("EDITOR") {
                                 Ok(e) => e,
@@ -796,6 +861,9 @@ fn main() -> rustyline::Result<()> {
                                 .spawn()
                                 .unwrap()
                                 .wait();
+
+                            config = ConfigFile::new();
+                            winfo!("Configuration file reloaded");
 
                             status = 0;
                         }
@@ -867,29 +935,47 @@ fn main() -> rustyline::Result<()> {
                                 stderr = Stdio::piped();
                             }
 
-                            let output = Command::new(c)
+                            wdebug!(config, "Command            : {}", c);
+                            wdebug!(config, "Command args       : {:#?}", &shell_command.args);
+                            wdebug!(config, "Command piped      : {}", &shell_command.piped);
+                            wdebug!(
+                                config,
+                                "Command redirection: {:#?}",
+                                &shell_command.redirection
+                            );
+
+                            let child = Command::new(c)
                                 .args(shell_command.args)
                                 .stdin(stdin)
                                 .stdout(stdout)
                                 .stderr(stderr)
                                 .spawn();
 
-                            match output {
-                                Ok(output) => {
+                            match child {
+                                Ok(child) => {
                                     status = 0;
 
-                                    // Process redirection if need be
-                                    if shell_command.redirection != Redirection::None {
-                                        let _o = &output
-                                            .wait_with_output()
-                                            .expect("failed to wait on child");
-
-                                        wwarning!("TODO: manage redirection");
-                                        // redirect(&line, o);
+                                    if !shell_command.piped {
+                                        child.wait_with_output().expect("failed to wait on child");
                                         previous_command = None;
                                     } else {
-                                        previous_command = Some(output);
+                                        previous_command = Some(child);
                                     }
+
+                                    // // Process redirection if need be
+                                    // if shell_command.redirection != Redirection::None {
+                                    //     let _o = &child
+                                    //         .wait_with_output()
+                                    //         .expect("failed to wait on child");
+                                    //
+                                    //     wwarning!("TODO: manage redirection");
+                                    //     // redirect(&line, o);
+                                    //     previous_command = None;
+                                    //     previous_command = Some(child);
+                                    // } else {
+                                    //     println!("Previous command = {:#?}", &child);
+                                    //     previous_command = Some(child);
+                                    // }
                                 }
                                 Err(e) => {
                                     previous_command = None;
@@ -899,10 +985,6 @@ fn main() -> rustyline::Result<()> {
                             };
                         }
                     }
-                }
-                if let Some(mut final_command) = previous_command {
-                    // block until the final command has finished
-                    final_command.wait().unwrap();
                 }
             }
             Err(ReadlineError::Interrupted) => (),
@@ -918,4 +1000,27 @@ fn main() -> rustyline::Result<()> {
     rl.save_history(&history).unwrap();
 
     Ok(())
+}
+
+fn main() -> rustyline::Result<()> {
+    setup_logging();
+
+    // Initialize interactive prompt
+    let config = Config::builder()
+        .history_ignore_space(true)
+        .completion_type(CompletionType::List)
+        .tab_stop(4)
+        .edit_mode(EditMode::Emacs)
+        .output_stream(OutputStreamType::Stdout)
+        .build();
+
+    let h = MyHelper {
+        completer: MyFilenameCompleter::new(),
+        highlighter: MatchingBracketHighlighter::new(),
+        hinter: HistoryHinter {},
+        colored_prompt: ">>>".to_owned(),
+        validator: MatchingBracketValidator::new(),
+    };
+
+    shell_loop(config, h)
 }
