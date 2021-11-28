@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3] - 2021-11-28
+
 ### Added
 
 - Basic support for wildcard (No recursive glob support yet)
