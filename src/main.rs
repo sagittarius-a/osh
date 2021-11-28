@@ -3,6 +3,7 @@ use console::style;
 use std::borrow::Cow::{self, Borrowed, Owned};
 use std::env::current_dir;
 use std::fs;
+use std::io;
 use std::path::{self, Path};
 use std::env::{set_var, remove_var};
 
@@ -563,6 +564,26 @@ fn perform_expansion_on_single_element(value: &str) -> String {
     result
 }
 
+fn perform_wildcard_expansion(value: &str) -> Option<Vec<String>> {
+    let mut result = Vec::new();
+
+    if !value.eq("*") {
+        return None
+    }
+
+    let mut entries = fs::read_dir(".").unwrap()
+        .map(|res| res.map(|e| e.path().to_str().unwrap().to_string()))
+        .collect::<Result<Vec<String>, io::Error>>().unwrap();
+
+    // The order in which `read_dir` returns entries is not guaranteed. If reproducible
+    // ordering is required the entries should be explicitly sorted.
+    entries.sort();
+
+    for entry in entries.iter() {
+        result.push(entry.to_string());
+    }
+    Some(result)
+}
 fn get_username() -> String {
     let mut username = String::new();
     if let Ok(u) = env::var("USERNAME") {
@@ -701,12 +722,18 @@ fn shell_loop(config: Config, helper: MyHelper) -> rustyline::Result<()> {
                             for part in parts {
                                 resolved.push(part);
                             }
-                        } else {
-                            // If no alias has been found, simply use the word as is
+                        } else if let Some(wildcard_expanded) = perform_wildcard_expansion(&expanded) {
+                            for w in wildcard_expanded.iter() {
+                                resolved.push(w.to_string());
+                            }
+                        }else {
+                            // If no alias has been found, no wildcard expanded, simply use the
+                            // word as is
                             resolved.push(expanded);
                         }
                     } else {
-                        // Make sure to keep values as is if we/re trying to remove an alias
+                        // We're dealing with "unalias" command so we need to make sure to keep
+                        // value as is
                         resolved.push(expanded);
                     }
                 }
