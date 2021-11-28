@@ -2,10 +2,10 @@ use console::style;
 
 use std::borrow::Cow::{self, Borrowed, Owned};
 use std::env::current_dir;
+use std::env::{remove_var, set_var};
 use std::fs;
 use std::io;
 use std::path::{self, Path};
-use std::env::{set_var, remove_var};
 
 use rustyline::completion::{escape, extract_word, unescape, Completer, Pair, Quote};
 use rustyline::config::OutputStreamType;
@@ -523,7 +523,11 @@ fn setup_logging() {
 
     let config = LogConfig::builder()
         .appender(Appender::builder().build("logfile", Box::new(logfile)))
-        .build(Root::builder().appender("logfile").build(LevelFilter::Debug))
+        .build(
+            Root::builder()
+                .appender("logfile")
+                .build(LevelFilter::Debug),
+        )
         .unwrap();
 
     log4rs::init_config(config).unwrap();
@@ -568,12 +572,14 @@ fn perform_wildcard_expansion(value: &str) -> Option<Vec<String>> {
     let mut result = Vec::new();
 
     if !value.eq("*") {
-        return None
+        return None;
     }
 
-    let mut entries = fs::read_dir(".").unwrap()
+    let mut entries = fs::read_dir(".")
+        .unwrap()
         .map(|res| res.map(|e| e.path().to_str().unwrap().to_string()))
-        .collect::<Result<Vec<String>, io::Error>>().unwrap();
+        .collect::<Result<Vec<String>, io::Error>>()
+        .unwrap();
 
     // The order in which `read_dir` returns entries is not guaranteed. If reproducible
     // ordering is required the entries should be explicitly sorted.
@@ -718,15 +724,18 @@ fn shell_loop(config: Config, helper: MyHelper) -> rustyline::Result<()> {
                         // If we've found an alias, resolve it and parse the resolved string as a new
                         // command, since it can be composed of several words
                         if let Some(resolved_alias) = lookup_aliases(&config, &expanded) {
-                            let parts = shell_words::split(&resolved_alias).expect("Failed to split resolved alias");
+                            let parts = shell_words::split(&resolved_alias)
+                                .expect("Failed to split resolved alias");
                             for part in parts {
                                 resolved.push(part);
                             }
-                        } else if let Some(wildcard_expanded) = perform_wildcard_expansion(&expanded) {
+                        } else if let Some(wildcard_expanded) =
+                            perform_wildcard_expansion(&expanded)
+                        {
                             for w in wildcard_expanded.iter() {
                                 resolved.push(w.to_string());
                             }
-                        }else {
+                        } else {
                             // If no alias has been found, no wildcard expanded, simply use the
                             // word as is
                             resolved.push(expanded);
@@ -762,7 +771,6 @@ fn shell_loop(config: Config, helper: MyHelper) -> rustyline::Result<()> {
                                 }
                                 None => {
                                     remove_var(env_var);
-
                                 }
                             };
 
@@ -798,7 +806,7 @@ fn shell_loop(config: Config, helper: MyHelper) -> rustyline::Result<()> {
 
                             config.aliases.insert(new_alias, aliased);
                             status = 0;
-                        },
+                        }
                         "unalias" => {
                             // Fetch the name of the new alias or display available aliases if not alias
                             // has been found
@@ -818,7 +826,7 @@ fn shell_loop(config: Config, helper: MyHelper) -> rustyline::Result<()> {
                                 continue 'shell;
                             }
                             config.aliases.remove(request);
-                        },
+                        }
                         "config" => {
                             let editor = match env::var("EDITOR") {
                                 Ok(e) => e,
@@ -915,7 +923,11 @@ fn shell_loop(config: Config, helper: MyHelper) -> rustyline::Result<()> {
                             wdebug!(config, "Command            : {}", c);
                             wdebug!(config, "Command args       : {:#?}", &shell_command.args);
                             wdebug!(config, "Command piped      : {}", &shell_command.piped);
-                            wdebug!(config, "Command redirection: {:#?}", &shell_command.redirection);
+                            wdebug!(
+                                config,
+                                "Command redirection: {:#?}",
+                                &shell_command.redirection
+                            );
 
                             let child = Command::new(c)
                                 .args(shell_command.args)
