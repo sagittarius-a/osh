@@ -571,11 +571,26 @@ fn perform_expansion_on_single_element(value: &str) -> String {
 fn perform_wildcard_expansion(value: &str) -> Option<Vec<String>> {
     let mut result = Vec::new();
 
-    if !value.eq("*") {
+    if !value.contains("*") {
         return None;
     }
 
-    let mut entries = fs::read_dir(".")
+    let mut dir = ".";
+    // If the user supplied a directory to perform wildcard expansion into, fetch the directory name
+    if value.contains("/*") {
+        if value.eq("/*") {
+            dir = "/";
+        } else {
+            dir = value
+                .split("/*")
+                .collect::<Vec<&str>>()
+                .iter()
+                .next()
+                .expect("Failed to identify directory where wildcard expansion must be performed");
+        }
+    }
+
+    let mut entries = fs::read_dir(dir)
         .unwrap()
         .map(|res| res.map(|e| e.path().to_str().unwrap().to_string()))
         .collect::<Result<Vec<String>, io::Error>>()
