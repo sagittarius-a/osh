@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Alias support
 - Logging support
+- Completion hints based on history (like fish or zsh-auto-suggestions)
+- Error code now available thanks to the `status` builtin command
+- Prompt color changes based on error code
+- Some additional keybindings have been implemented (see README.md for details)
 
 ### Changed
 
