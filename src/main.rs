@@ -11,12 +11,9 @@ use crate::rustyline_helper::{MyFilenameCompleter, MyHelper};
 use crate::shell::shell_loop;
 
 use rustyline::config::OutputStreamType;
-// use rustyline::error::ReadlineError;
 use rustyline::highlight::MatchingBracketHighlighter;
 use rustyline::hint::HistoryHinter;
 use rustyline::validate::MatchingBracketValidator;
-// use rustyline::Movement;
-// use rustyline::Word;
 use rustyline::{CompletionType, Config, EditMode};
 
 extern crate shell_words;

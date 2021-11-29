@@ -29,7 +29,7 @@ pub fn perform_expansion_on_single_element(value: &str) -> String {
 pub fn perform_wildcard_expansion(value: &str) -> Option<Vec<String>> {
     let mut result = Vec::new();
 
-    if !value.contains("*") {
+    if !value.contains('*') {
         return None;
     }
 
@@ -41,9 +41,7 @@ pub fn perform_wildcard_expansion(value: &str) -> Option<Vec<String>> {
         } else {
             dir = value
                 .split("/*")
-                .collect::<Vec<&str>>()
-                .iter()
-                .next()
+                .collect::<Vec<&str>>().get(0)
                 .expect("Failed to identify directory where wildcard expansion must be performed");
         }
     }
