@@ -841,6 +841,7 @@ fn shell_loop(config: Config, helper: MyHelper) -> rustyline::Result<()> {
                                 continue 'shell;
                             }
                             config.aliases.remove(request);
+                            status = 0;
                         }
                         "config" => {
                             let editor = match env::var("EDITOR") {
