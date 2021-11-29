@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Set status to 0 when successfully removing an alias
+
 ## [0.3] - 2021-11-28
 
 ### Added
