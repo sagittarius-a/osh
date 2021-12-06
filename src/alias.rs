@@ -1,15 +1,20 @@
-use crate::config::ConfigFile;
+use crate::shell::Osh;
 
-use std::collections::HashMap;
-
-/// Replace the `command` with an alias if available.
-pub fn lookup_aliases(config: &ConfigFile, value: &str) -> Option<String> {
-    config.aliases.get(value).map(|s| s.to_string())
+pub trait Alias {
+    fn lookup_aliases(&self, value: &str) -> Option<String>;
+    fn list_aliases(&self);
 }
 
-// TODO: List aliases for better readability
-pub fn list_aliases(aliases: &HashMap<String, String>) {
-    for (key, value) in aliases.iter() {
-        println!("{}: {}", key, value);
+impl Alias for Osh {
+    /// Replace the `command` with an alias if available.
+    fn lookup_aliases(&self, value: &str) -> Option<String> {
+        self.aliases.get(value).map(|s| s.to_string())
+    }
+
+    // TODO: List aliases for better readability
+    fn list_aliases(&self) {
+        for (key, value) in self.aliases.iter() {
+            println!("{}: {}", key, value);
+        }
     }
 }

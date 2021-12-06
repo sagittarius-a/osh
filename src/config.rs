@@ -1,6 +1,8 @@
-use crate::utils::{
-    default_prompt, get_hostname, get_username, perform_expansion_on_single_element,
-};
+// use crate::utils::{
+//     Utils,
+// };
+use crate::shell::Osh;
+use crate::utils::Utils;
 use crate::{wdebug, werror};
 
 use serde::Deserialize;
@@ -11,13 +13,13 @@ use console::style;
 #[derive(Debug, Deserialize)]
 pub struct ConfigFile {
     pub aliases: HashMap<String, String>,
-    #[serde(default = "default_prompt")]
+    #[serde(default = "Osh::default_prompt")]
     pub prompt: String,
     #[serde(default)]
     pub debug: bool,
-    #[serde(default = "get_username")]
+    #[serde(default = "Osh::get_username")]
     pub username: String,
-    #[serde(default = "get_hostname")]
+    #[serde(default = "Osh::get_hostname")]
     pub hostname: String,
 }
 
@@ -26,7 +28,7 @@ impl ConfigFile {
         let mut config_file: Option<ConfigFile> = None;
 
         // Try to read the configuration file
-        match std::fs::File::open(perform_expansion_on_single_element("~/.shell.yaml")) {
+        match std::fs::File::open(Osh::perform_expansion_on_single_element("~/.shell.yaml")) {
             Ok(f) => {
                 // Load aliases
                 config_file = serde_yaml::from_reader(f).unwrap();
@@ -42,10 +44,10 @@ impl ConfigFile {
             }
             None => ConfigFile {
                 aliases: HashMap::new(),
-                prompt: default_prompt(),
+                prompt: Osh::default_prompt(),
                 debug: false,
-                username: get_username(),
-                hostname: get_hostname(),
+                username: Osh::get_username(),
+                hostname: Osh::get_hostname(),
             },
         }
     }

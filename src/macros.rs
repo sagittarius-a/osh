@@ -1,17 +1,17 @@
 #[macro_export]
 macro_rules! wdebug {
-    ($config:ident) => {
+    ($config:expr) => {
         if $config.debug {
             print!("\n")
         }
     };
-    ($config:ident, $fmt:expr) => {
+    ($config:expr, $fmt:expr) => {
         if $config.debug {
             print!(concat!($fmt, "\n"));
             log::debug!($fmt);
         }
     };
-    ($config:ident, $fmt:expr, $($arg:tt)*) => {
+    ($config:expr, $fmt:expr, $($arg:tt)*) => {
             if $config.debug {
             print!(concat!($fmt, "\n"), $($arg)*);
             log::debug!($fmt, $($arg)*);
