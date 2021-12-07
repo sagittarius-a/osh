@@ -52,6 +52,11 @@ pub struct Osh {
     status: u32,
     prompt: String,
     previous_directory: PathBuf,
+
+struct BuiltinCommandResult {
+    is_builtin: bool,
+    /// Determine if we skip any further processing after builtin command execution
+    skip: bool,
 }
 
 impl Osh {
@@ -171,6 +176,185 @@ impl Osh {
         prompt
     }
 
+    /// Check if the supplied command is a builtin and set flags accordingly
+    fn try_builtin(&mut self, shell_command: &ShellCommand) -> BuiltinCommandResult {
+        let mut result = BuiltinCommandResult {
+            is_builtin: true,
+            skip: false,
+        };
+
+        match &shell_command.command[..] {
+            "export" => {
+                let mut args = shell_command.args.iter();
+                let env_var = match args.next() {
+                    Some(v) => v.clone(),
+                    None => {
+                        werror!("No environment variable provided");
+                        self.status = 1;
+                        result.skip = true;
+                        return result;
+                    }
+                };
+
+                match args.next() {
+                    Some(v) => {
+                        set_var(env_var, v);
+                    }
+                    None => {
+                        remove_var(env_var);
+                    }
+                };
+
+                self.status = 0;
+            }
+            "unset" => {
+                let mut args = shell_command.args.iter();
+                match args.next() {
+                    Some(v) => {
+                        remove_var(v);
+                    }
+                    None => {
+                        werror!("No environment variable provided");
+                        self.status = 1;
+                        result.skip = true;
+                    }
+                };
+            }
+            "alias" => {
+                // Register a new alias
+                let mut args = shell_command.args.iter();
+                let new_alias = match args.next() {
+                    Some(v) => v.clone(),
+                    None => {
+                        self.list_aliases();
+                        self.status = 0;
+                        result.skip = true;
+                        return result;
+                    }
+                };
+
+                // Build the command by parsing the rest of the command provided
+                let aliased = args.cloned().collect::<Vec<String>>().join(" ");
+
+                self.config.aliases.insert(new_alias, aliased);
+                self.status = 0;
+            }
+            "unalias" => {
+                result.is_builtin = true;
+                // Fetch the name of the new alias or display available aliases if not alias
+                // has been found
+                let mut args = shell_command.args.iter();
+                let request = match args.next() {
+                    Some(v) => v,
+                    None => {
+                        werror!("No alias provided");
+                        self.status = 1;
+                        result.skip = true;
+                        return result;
+                    }
+                };
+
+                if !self.config.aliases.contains_key(request) {
+                    werror!("{} is not an alias", request);
+                    self.status = 1;
+                    result.skip = true;
+                }
+                self.config.aliases.remove(request);
+                self.status = 0;
+            }
+            "config" => {
+                let editor = match env::var("EDITOR") {
+                    Ok(e) => e,
+                    Err(_) => {
+                        werror!("EDITOR variable not set. Cannot open configuration file");
+                        self.status = 1;
+                        result.is_builtin = true;
+                        result.skip = true;
+                        return result;
+                    }
+                };
+
+                let _ = Command::new(editor)
+                    .args(vec![Osh::perform_expansion_on_single_element(
+                        "~/.shell.yaml",
+                    )])
+                    .stdin(Stdio::inherit())
+                    .stdout(Stdio::inherit())
+                    .spawn()
+                    .unwrap()
+                    .wait();
+
+                self.config = ConfigFile::new();
+                winfo!("Configuration file reloaded");
+
+                self.status = 0;
+            }
+            "reload" => {
+                self.config = ConfigFile::new();
+                winfo!("Configuration file reloaded");
+                self.status = 0;
+            }
+            "status" => {
+                winfo!("Status: {}", self.status);
+                self.status = 0;
+            }
+            "history" => {
+                result.is_builtin = true;
+
+                for (i, h) in self.rl.history().iter().enumerate() {
+                    println!("{:>3} :: {}", i, h);
+                }
+                self.status = 0;
+            }
+            "cd" => {
+                // default to '~' of '/' as new directory if one was not provided
+                let dir = match env::var("HOME") {
+                    Ok(val) => val,
+                    Err(_) => {
+                        werror!("HOME variable not set. Using / as default target");
+                        "/".into()
+                    }
+                };
+                let mut args = shell_command.args.iter();
+                let new_dir = match args.next() {
+                    Some(v) => v,
+                    None => &dir[..],
+                };
+
+                let target;
+                // Use "-" to go to the last directory visited
+                if new_dir == "-" {
+                    target = self.previous_directory.to_str().unwrap();
+                } else {
+                    target = new_dir;
+                }
+
+                // Perform variable expansion
+                let target = Osh::perform_expansion_on_single_element(target);
+                // Save the location we're in before changing directory
+                let dir_before_cd = env::current_dir().unwrap();
+
+                if let Err(e) = env::set_current_dir(Path::new(&target)) {
+                    werror!("Error: {}: '{}'", e, target);
+                    self.status = 1;
+                    result.skip = true;
+                }
+
+                // Update the last directory if need be
+                if env::current_dir().unwrap() != dir_before_cd {
+                    self.previous_directory =
+                        Path::new(dir_before_cd.to_str().unwrap()).to_path_buf();
+                }
+
+                self.status = 0;
+            }
+            _ => {
+                result.is_builtin = false;
+            }
+        }
+        result
+    }
+
     pub fn repl(&mut self) -> rustyline::Result<()> {
         'shell_loop: loop {
             self.prompt = Osh::build_prompt(&self.config, self.status);
@@ -229,243 +413,83 @@ impl Osh {
                     // execute
                     let shell_commands = self.build_commands(resolved);
                     for shell_command in shell_commands {
-                        let command = shell_command.command;
+                        // Try to execute the command as builtin if need be
+                        let builtin_result = self.try_builtin(&shell_command);
+                        if builtin_result.skip {
+                            continue 'shell_loop;
+                        }
 
-                        match &command[..] {
-                            "export" => {
-                                let mut args = shell_command.args.iter();
-                                let env_var = match args.next() {
-                                    Some(v) => v.clone(),
-                                    None => {
-                                        werror!("No environment variable provided");
-                                        self.status = 1;
-                                        continue 'shell_loop;
-                                    }
-                                };
+                        if !builtin_result.is_builtin {
+                            let command = shell_command.command;
+                            let stdin = previous_command
+                                .map_or(Stdio::inherit(), |output: Child| {
+                                    Stdio::from(output.stdout.unwrap())
+                                });
 
-                                match args.next() {
-                                    Some(v) => {
-                                        set_var(env_var, v);
-                                    }
-                                    None => {
-                                        remove_var(env_var);
-                                    }
-                                };
-
-                                self.status = 0;
+                            let mut stdout = Stdio::inherit();
+                            let mut stderr = Stdio::inherit();
+                            if shell_command.piped {
+                                stdout = Stdio::piped();
+                                stderr = Stdio::piped();
+                            } else if shell_command.redirection != Redirection::None {
+                                stdout = Stdio::piped();
+                                stderr = Stdio::piped();
                             }
-                            "unset" => {
-                                let mut args = shell_command.args.iter();
-                                match args.next() {
-                                    Some(v) => {
-                                        remove_var(v);
-                                    }
-                                    None => {
-                                        werror!("No environment variable provided");
-                                        self.status = 1;
-                                        continue 'shell_loop;
-                                    }
-                                };
-                            }
-                            "alias" => {
-                                // Register a new alias
-                                let mut args = shell_command.args.iter();
-                                let new_alias = match args.next() {
-                                    Some(v) => v.clone(),
-                                    None => {
-                                        self.list_aliases();
-                                        self.status = 0;
-                                        continue 'shell_loop;
-                                    }
-                                };
 
-                                // Build the command by parsing the rest of the command provided
-                                let aliased = args.cloned().collect::<Vec<String>>().join(" ");
+                            wdebug!(self.config, "Command            : {}", command);
+                            wdebug!(
+                                self.config,
+                                "Command args       : {:#?}",
+                                &shell_command.args
+                            );
+                            wdebug!(self.config, "Command piped      : {}", &shell_command.piped);
+                            wdebug!(
+                                self.config,
+                                "Command redirection: {:#?}",
+                                &shell_command.redirection
+                            );
 
-                                self.config.aliases.insert(new_alias, aliased);
-                                self.status = 0;
-                            }
-                            "unalias" => {
-                                // Fetch the name of the new alias or display available aliases if not alias
-                                // has been found
-                                let mut args = shell_command.args.iter();
-                                let request = match args.next() {
-                                    Some(v) => v,
-                                    None => {
-                                        werror!("No alias provided");
-                                        self.status = 1;
-                                        continue 'shell_loop;
-                                    }
-                                };
+                            let child = Command::new(command.clone())
+                                .args(shell_command.args)
+                                .stdin(stdin)
+                                .stdout(stdout)
+                                .stderr(stderr)
+                                .spawn();
 
-                                if !self.config.aliases.contains_key(request) {
-                                    werror!("{} is not an alias", request);
-                                    self.status = 1;
-                                    continue 'shell_loop;
-                                }
-                                self.config.aliases.remove(request);
-                                self.status = 0;
-                            }
-                            "config" => {
-                                let editor = match env::var("EDITOR") {
-                                    Ok(e) => e,
-                                    Err(_) => {
-                                        werror!(
-                                        "EDITOR variable not set. Cannot open configuration file"
-                                    );
-                                        self.status = 1;
-                                        continue 'shell_loop;
-                                    }
-                                };
+                            match child {
+                                Ok(child) => {
+                                    self.status = 0;
 
-                                let _ = Command::new(editor)
-                                    .args(vec![Osh::perform_expansion_on_single_element(
-                                        "~/.shell.yaml",
-                                    )])
-                                    .stdin(Stdio::inherit())
-                                    .stdout(Stdio::inherit())
-                                    .spawn()
-                                    .unwrap()
-                                    .wait();
-
-                                self.config = ConfigFile::new();
-                                winfo!("Configuration file reloaded");
-
-                                self.status = 0;
-                            }
-                            "reload" => {
-                                self.config = ConfigFile::new();
-                                winfo!("Configuration file reloaded");
-                                self.status = 0;
-                            }
-                            "status" => {
-                                winfo!("Status: {}", self.status);
-                                self.status = 0;
-                            }
-                            "history" => {
-                                for (i, h) in self.rl.history().iter().enumerate() {
-                                    println!("{:>3} :: {}", i, h);
-                                }
-                                self.status = 0;
-                            }
-                            "cd" => {
-                                // default to '~' of '/' as new directory if one was not provided
-                                let dir = match env::var("HOME") {
-                                    Ok(val) => val,
-                                    Err(_) => {
-                                        werror!("HOME variable not set. Using / as default target");
-                                        "/".into()
-                                    }
-                                };
-                                let mut args = shell_command.args.iter();
-                                let new_dir = match args.next() {
-                                    Some(v) => v,
-                                    None => &dir[..],
-                                };
-
-                                let target;
-                                // Use "-" to go to the last directory visited
-                                if new_dir == "-" {
-                                    target = self.previous_directory.to_str().unwrap();
-                                } else {
-                                    target = new_dir;
-                                }
-
-                                // Perform variable expansion
-                                let target = Osh::perform_expansion_on_single_element(target);
-                                // Save the location we're in before changing directory
-                                let dir_before_cd = env::current_dir().unwrap();
-
-                                if let Err(e) = env::set_current_dir(Path::new(&target)) {
-                                    werror!("Error: {}: '{}'", e, target);
-                                    self.status = 1;
-                                    continue 'shell_loop;
-                                }
-
-                                // Update the last directory if need be
-                                if env::current_dir().unwrap() != dir_before_cd {
-                                    self.previous_directory =
-                                        Path::new(dir_before_cd.to_str().unwrap()).to_path_buf();
-                                }
-
-                                previous_command = None;
-                                self.status = 0
-                            }
-                            c => {
-                                let stdin = previous_command
-                                    .map_or(Stdio::inherit(), |output: Child| {
-                                        Stdio::from(output.stdout.unwrap())
-                                    });
-
-                                let mut stdout = Stdio::inherit();
-                                let mut stderr = Stdio::inherit();
-                                if shell_command.piped {
-                                    stdout = Stdio::piped();
-                                    stderr = Stdio::piped();
-                                } else if shell_command.redirection != Redirection::None {
-                                    stdout = Stdio::piped();
-                                    stderr = Stdio::piped();
-                                }
-
-                                wdebug!(self.config, "Command            : {}", c);
-                                wdebug!(
-                                    self.config,
-                                    "Command args       : {:#?}",
-                                    &shell_command.args
-                                );
-                                wdebug!(
-                                    self.config,
-                                    "Command piped      : {}",
-                                    &shell_command.piped
-                                );
-                                wdebug!(
-                                    self.config,
-                                    "Command redirection: {:#?}",
-                                    &shell_command.redirection
-                                );
-
-                                let child = Command::new(c)
-                                    .args(shell_command.args)
-                                    .stdin(stdin)
-                                    .stdout(stdout)
-                                    .stderr(stderr)
-                                    .spawn();
-
-                                match child {
-                                    Ok(child) => {
-                                        self.status = 0;
-
-                                        if !shell_command.piped {
-                                            child
-                                                .wait_with_output()
-                                                .expect("failed to wait on child");
-                                            previous_command = None;
-                                        } else {
-                                            previous_command = Some(child);
-                                        }
-
-                                        // // Process redirection if need be
-                                        // if shell_command.redirection != Redirection::None {
-                                        //     let _o = &child
-                                        //         .wait_with_output()
-                                        //         .expect("failed to wait on child");
-                                        //
-                                        //     wwarning!("TODO: manage redirection");
-                                        //     // redirect(&line, o);
-                                        //     previous_command = None;
-                                        //     previous_command = Some(child);
-                                        // } else {
-                                        //     println!("Previous command = {:#?}", &child);
-                                        //     previous_command = Some(child);
-                                        // }
-                                    }
-                                    Err(e) => {
+                                    if !shell_command.piped {
+                                        child.wait_with_output().expect("failed to wait on child");
                                         previous_command = None;
-                                        werror!("{}: {:?}", e, command);
-                                        self.status = 1;
+                                    } else {
+                                        previous_command = Some(child);
                                     }
-                                };
-                            }
+
+                                    // self.child = None;
+
+                                    // // Process redirection if need be
+                                    // if shell_command.redirection != Redirection::None {
+                                    //     let _o = &child
+                                    //         .wait_with_output()
+                                    //         .expect("failed to wait on child");
+                                    //
+                                    //     wwarning!("TODO: manage redirection");
+                                    //     // redirect(&line, o);
+                                    //     previous_command = None;
+                                    //     previous_command = Some(child);
+                                    // } else {
+                                    //     println!("Previous command = {:#?}", &child);
+                                    //     previous_command = Some(child);
+                                    // }
+                                }
+                                Err(e) => {
+                                    previous_command = None;
+                                    werror!("{}: {:?}", e, command);
+                                    self.status = 1;
+                                }
+                            };
                         }
                     }
                 }
