@@ -342,6 +342,12 @@ impl Osh {
                                 winfo!("Status: {}", self.status);
                                 self.status = 0;
                             }
+                            "history" => {
+                                for (i, h) in self.rl.history().iter().enumerate() {
+                                    println!("{:>3} :: {}", i, h);
+                                }
+                                self.status = 0;
+                            }
                             "cd" => {
                                 // default to '~' of '/' as new directory if one was not provided
                                 let dir = match env::var("HOME") {

@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Set status to 0 when successfully removing an alias
 - Refactored the code base in order to improve maintainability
+- Add `history` command to show command history
 
 ## [0.3] - 2021-11-28
 
